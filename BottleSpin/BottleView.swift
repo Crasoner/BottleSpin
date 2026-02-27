@@ -6,11 +6,27 @@ struct BottleView: View {
     @State private var spinCount = 0
     @State private var isLongPressing = false
     @State private var chargeProgress: CGFloat = 0
+    @State private var chargeTimer: Timer?
+    @State private var pressStartTime: Date?
     
     private let minSpinDuration: Double = 3.0
     private let maxSpinDuration: Double = 10.0
+    
     private var spinDuration: Double {
-        minSpinDuration + (maxSpinDuration - minSpinDuration) * Double(chargeProgress)
+        guard let startTime = pressStartTime else { return minSpinDuration }
+        let pressDuration = Date().timeIntervalSince(startTime)
+        let duration = minSpinDuration + pressDuration
+        return min(duration, maxSpinDuration)
+    }
+    
+    private func getRotations(for duration: Double) -> Double {
+        if duration <= 3 {
+            return 10
+        } else if duration <= 5 {
+            return 10 + (duration - 3) * 5
+        } else {
+            return min(20 + (duration - 5) * 4, 40)
+        }
     }
     
     var body: some View {
@@ -21,7 +37,7 @@ struct BottleView: View {
                 ZStack {
                     if chargeProgress > 0 {
                         ChargeCircle(progress: chargeProgress)
-                            .frame(width: 300, height: 300)
+                            .frame(width: 1200, height: 1200)
                     }
                     
                     Image("bottle")
@@ -33,6 +49,7 @@ struct BottleView: View {
                 .onLongPressGesture(minimumDuration: 0.1, pressing: { pressing in
                     if pressing && !isSpinning {
                         isLongPressing = true
+                        pressStartTime = Date()
                         startCharging()
                     } else if !pressing && isLongPressing {
                         isLongPressing = false
@@ -57,35 +74,51 @@ struct BottleView: View {
     
     private func startCharging() {
         chargeProgress = 0
-        withAnimation(.linear(duration: maxSpinDuration)) {
-            chargeProgress = 1.0
+        chargeTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
+            guard let startTime = pressStartTime else { return }
+            let elapsed = Date().timeIntervalSince(startTime)
+            let progress = min(elapsed / maxSpinDuration, 1.0)
+            chargeProgress = CGFloat(progress)
         }
     }
     
     private func stopCharging() {
+        chargeTimer?.invalidate()
+        chargeTimer = nil
+        
+        let duration = spinDuration
         chargeProgress = 0
-        startSpin(duration: spinDuration)
+        pressStartTime = nil
+        
+        startSpin(duration: duration)
     }
     
     private func startSpin(duration: Double) {
         isSpinning = true
         spinCount += 1
         
-        let randomRotations = Double.random(in: 3...10) * 360
+        let rotations = getRotations(for: duration)
+        let totalDegrees = rotations * 360
+        let randomOffset = Double.random(in: 0..<360)
+        let finalAngle = rotationAngle + totalDegrees + randomOffset
         
-        withAnimation(.easeIn(duration: 0.5)) {
-            rotationAngle += randomRotations * 0.3
+        let accelerateTime = duration * 0.15
+        let decelerateTime = duration * 0.25
+        let constantTime = duration - accelerateTime - decelerateTime
+        
+        withAnimation(.easeIn(duration: accelerateTime)) {
+            rotationAngle = finalAngle - (totalDegrees * 0.3)
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            withAnimation(.linear(duration: duration - 1.5)) {
-                rotationAngle += randomRotations * 0.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + accelerateTime) {
+            withAnimation(.linear(duration: constantTime)) {
+                rotationAngle = finalAngle - (totalDegrees * 0.1)
             }
         }
         
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration - 1.0) {
-            withAnimation(.easeOut(duration: 1.0)) {
-                rotationAngle += randomRotations * 0.2
+        DispatchQueue.main.asyncAfter(deadline: .now() + accelerateTime + constantTime) {
+            withAnimation(.easeOut(duration: decelerateTime)) {
+                rotationAngle = finalAngle
             }
         }
         
@@ -100,21 +133,17 @@ struct ChargeCircle: View {
     
     var body: some View {
         Circle()
-            .fill(chargeColor.opacity(0.3))
+            .fill(chargeColor)
             .frame(width: chargeSize, height: chargeSize)
-            .overlay(
-                Circle()
-                    .fill(chargeColor)
-                    .frame(width: chargeSize * 0.8, height: chargeSize * 0.8)
-            )
     }
     
     private var chargeSize: CGFloat {
-        100 + progress * 150
+        200 + progress * 950
     }
     
     private var chargeColor: Color {
-        Color(red: 0.3, green: 0.5, blue: 1.0 - progress * 0.3)
+        Color(red: 0.4, green: 0.5, blue: 1.0 - progress * 0.5)
+            .opacity(0.3 + progress * 0.4)
     }
 }
 
